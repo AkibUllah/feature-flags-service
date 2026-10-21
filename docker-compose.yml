@@ -1,0 +1,43 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://flags:flags@db:5432/flags
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me}
+      SCHEDULER_INTERVAL_SECONDS: "15"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: flags
+      POSTGRES_PASSWORD: flags
+      POSTGRES_DB: flags
+    volumes:
+      - flags-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flags -d flags"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  flags-pgdata:
