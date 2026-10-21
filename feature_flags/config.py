@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
     webhook_timeout_seconds: float = Field(default=5.0, gt=0)
     payload_cache_ttl_seconds: int = Field(default=300, ge=1)
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalise_database_url(cls, value: str) -> str:
+        """Managed Postgres (Render, Heroku) hands out ``postgres://`` or ``postgresql://`` URLs;
+        SQLAlchemy needs the installed psycopg 3 driver spelled out."""
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
 
 
 @lru_cache
