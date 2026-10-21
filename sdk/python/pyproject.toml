@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flagclient"
+version = "0.1.0"
+description = "Minimal Python client for feature-flags-service: polling with ETag and local evaluation"
+license = { text = "MIT" }
+authors = [{ name = "Akib Jafor" }]
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.26", "feature-flags-service"]
+
+[tool.setuptools.packages.find]
+include = ["flagclient*"]
