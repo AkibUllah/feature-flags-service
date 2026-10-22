@@ -30,3 +30,7 @@ coverage/
 .vscode/
 *.swp
 .DS_Store
+
+# Exported schema and Codespaces demo SDK key
+/openapi.json
+.demo-sdk-key.txt

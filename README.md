@@ -8,6 +8,15 @@ A feature flag and remote config service: boolean and multivariate flags with at
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Try it live
+
+| | |
+|---|---|
+| API reference | https://akibullah.github.io/feature-flags-service/ — Swagger UI built from the exported OpenAPI document (static; no backend behind it) |
+| Run in your browser | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AkibUllah/feature-flags-service?quickstart=1) — starts API + PostgreSQL + Redis with `docker compose`, seeds project `shop` with a targeted `new-checkout` flag and writes a server SDK key to `.demo-sdk-key.txt`; open forwarded port 8000 at `/docs` (admin `X-API-Key: change-me`). Node 18 and the TypeScript SDK dependencies are installed too (`make sdk-ts`). |
+| One-click deploy | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/AkibUllah/feature-flags-service) — `render.yaml` provisions the web service, a free PostgreSQL and a Key Value store; `ADMIN_API_KEY` is generated. |
+| Local | `docker compose up` (see Quick Start) |
+
 ## Why this exists
 
 Shipping a new checkout to a retail platform or a new KYC flow to a wallet app is never "deploy and hope": you want it on for staff first, then 5% of Dhaka users on app version 2.4 or newer, then everyone, and you want one button that turns it off at 2am without a rollback. Every team I have worked with ends up with a `settings` table and a cache that is wrong on half the servers. This service is that table done properly: evaluation is a pure function over a versioned payload, so the server, the Python SDK and your tests all agree on what a user sees; clients learn about changes within a second over SSE; and every change says who did it, what it was before and what it is now.

@@ -3,7 +3,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 TS := sdk/typescript
 
-.PHONY: help venv install dev test cov lint fmt sdk-ts docker-up docker-down clean
+.PHONY: help venv install dev test cov lint fmt sdk-ts openapi docker-up docker-down clean
 
 help: ## Show targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -36,6 +36,9 @@ lint: ## Ruff check + format check
 fmt: ## Format + autofix
 	$(VENV)/bin/ruff format feature_flags tests sdk/python
 	$(VENV)/bin/ruff check --fix feature_flags tests sdk/python
+
+openapi: ## Export the OpenAPI document to openapi.json
+	$(PY) scripts/export_openapi.py
 
 docker-up: ## api + postgres + redis
 	docker compose up --build -d
