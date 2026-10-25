@@ -38,7 +38,7 @@ export class FlagClient {
     if (!options.sdkKey.startsWith("cli-")) {
       throw new Error("FlagClient needs a client-side SDK key (cli-…); never ship server keys to browsers");
     }
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = trimTrailingSlashes(options.baseUrl);
     this.sdkKey = options.sdkKey;
     this.context = options.context;
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
@@ -188,4 +188,10 @@ function defaultEventSource(): FlagClientOptions["eventSource"] {
   if (!ES) return undefined;
   // Browsers' EventSource cannot set headers; the service also accepts the key as a query parameter.
   return (url) => new ES(url);
+}
+
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* "/" */) end -= 1;
+  return url.slice(0, end);
 }
