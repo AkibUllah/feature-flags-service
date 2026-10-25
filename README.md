@@ -4,6 +4,8 @@
 A feature flag and remote config service: boolean and multivariate flags with attribute, regex and semver targeting, sticky percentage rollouts, reusable segments, per-environment configs with a kill switch, scheduled changes, a full audit trail, ETag-cached bulk payloads and a Server-Sent Events stream, plus a Python server SDK and a typed TypeScript client SDK.
 
 [![CI](https://github.com/AkibUllah/feature-flags-service/actions/workflows/ci.yml/badge.svg)](https://github.com/AkibUllah/feature-flags-service/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/AkibUllah/feature-flags-service/actions/workflows/codeql.yml/badge.svg)](https://github.com/AkibUllah/feature-flags-service/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/AkibUllah/feature-flags-service)](https://github.com/AkibUllah/feature-flags-service/releases)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -16,6 +18,16 @@ A feature flag and remote config service: boolean and multivariate flags with at
 | Run in your browser | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AkibUllah/feature-flags-service?quickstart=1) — starts API + PostgreSQL + Redis with `docker compose`, seeds project `shop` with a targeted `new-checkout` flag and writes a server SDK key to `.demo-sdk-key.txt`; open forwarded port 8000 at `/docs` (admin `X-API-Key: change-me`). Node 18 and the TypeScript SDK dependencies are installed too (`make sdk-ts`). |
 | One-click deploy | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/AkibUllah/feature-flags-service) — `render.yaml` provisions the web service, a free PostgreSQL and a Key Value store; `ADMIN_API_KEY` is generated. |
 | Local | `docker compose up` (see Quick Start) |
+
+## Screenshots
+
+![Evaluating a targeted flag](docs/images/evaluate-session.png)
+
+*A real session against a local API: the seeded `new-checkout` flag served by individual target, by the `bd-modern` rule and by the 20% rollout, an ETag `304` on the SDK payload, the kill switch, and the audit trail that recorded each change.*
+
+![API reference](docs/images/api-reference.png)
+
+*The management endpoints in the [live API reference](https://akibullah.github.io/feature-flags-service/).*
 
 ## Why this exists
 
@@ -199,13 +211,13 @@ feature_flags/
 └── api/                    # admin.py, sdk.py (evaluate, flags, stream)
 sdk/python/flagclient/      # FlagClient: refresh/poll with ETag, variation(), all_flags()
 sdk/typescript/src/         # FlagClient: init/identify/on('change'), SSE, bootstrap
-tests/                      # 83 service tests · sdk/python/tests: 6 · sdk/typescript/tests: 13
+tests/                      # 88 service tests · sdk/python/tests: 6 · sdk/typescript/tests: 13
 ```
 
 ## Testing
 
 ```bash
-make test        # 89 Python tests (service + Python SDK), in-memory SQLite + fakeredis
+make test        # 94 Python tests (service + Python SDK), in-memory SQLite + fakeredis
 make cov         # with coverage (94% at the time of writing)
 make lint        # ruff
 make sdk-ts      # eslint + tsc --noEmit + vitest (13 tests) + tsup build
@@ -215,11 +227,11 @@ Covered: semver parsing and ordering incl. pre-releases; every clause operator, 
 
 ## Roadmap
 
-- Redis pub/sub behind `EventBus` so SSE works across several API replicas
-- Prerequisite flags (flag B only on when flag A is on) and experiment allocation with holdouts
-- Alembic migrations (schema is created with `create_all` today)
-- Per-key rate limiting on `/v1/evaluate` and payload compression for very large projects
-- A small React admin UI over the management API
+- [ ] Redis pub/sub behind `EventBus` so SSE works across several API replicas (#1)
+- [ ] Prerequisite flags (flag B only on when flag A is on) and experiment allocation with holdouts (#2)
+- [ ] Alembic migrations (schema is created with `create_all` today) (#3)
+- [ ] Per-key rate limiting on `/v1/evaluate` and payload compression for very large projects (#4)
+- [ ] A small React admin UI over the management API (#5)
 
 ## License
 
