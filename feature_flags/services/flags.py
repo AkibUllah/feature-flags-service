@@ -15,15 +15,21 @@ from feature_flags.services.bus import ChangeEvent
 from feature_flags.services.context import AppContext
 from feature_flags.services.errors import Conflict, NotFound
 from feature_flags.services.projects import bump_environment
-from feature_flags.services.validation import validate_config, validate_key, validate_variations
+from feature_flags.services.validation import (
+    validate_config,
+    validate_key,
+    validate_prerequisites,
+    validate_variations,
+)
 
-CONFIG_FIELDS = ("enabled", "off_variation", "targets", "rules", "fallthrough")
+CONFIG_FIELDS = ("enabled", "off_variation", "prerequisites", "targets", "rules", "fallthrough")
 
 
 def config_snapshot(config: FlagConfig) -> dict[str, Any]:
     return {
         "enabled": config.enabled,
         "off_variation": config.off_variation,
+        "prerequisites": config.prerequisites or [],
         "targets": config.targets,
         "rules": config.rules,
         "fallthrough": config.fallthrough,
@@ -33,6 +39,41 @@ def config_snapshot(config: FlagConfig) -> dict[str, Any]:
 
 def segment_keys(session: Session, project_id: str) -> set[str]:
     return set(session.scalars(select(Segment.key).where(Segment.project_id == project_id)))
+
+
+def check_config(
+    session: Session, project: Project, flag: Flag, env: Environment, merged: dict[str, Any]
+) -> None:
+    """Validate a full candidate config, including its prerequisites against the other live
+    flags of the project in this environment."""
+    validate_config(merged, flag.variations, segment_keys(session, project.id))
+    live = session.execute(
+        select(Flag.key, Flag.variations, FlagConfig.prerequisites)
+        .join(FlagConfig, FlagConfig.flag_id == Flag.id)
+        .where(
+            Flag.project_id == project.id,
+            Flag.archived.is_(False),
+            FlagConfig.environment_id == env.id,
+        )
+    ).all()
+    validate_prerequisites(
+        flag.key,
+        merged.get("prerequisites") or [],
+        {key: {v["key"] for v in variations} for key, variations, _ in live},
+        {key: [p["flag_key"] for p in prereqs or []] for key, _, prereqs in live},
+    )
+
+
+def dependent_flags(session: Session, project: Project, flag: Flag) -> list[str]:
+    """Live flags that list `flag` as a prerequisite in any environment."""
+    rows = session.execute(
+        select(Flag.key, FlagConfig.prerequisites)
+        .join(FlagConfig, FlagConfig.flag_id == Flag.id)
+        .where(Flag.project_id == project.id, Flag.archived.is_(False), Flag.id != flag.id)
+    ).all()
+    return sorted(
+        {key for key, prereqs in rows if any(p["flag_key"] == flag.key for p in prereqs or [])}
+    )
 
 
 def create_flag(
@@ -83,6 +124,7 @@ def create_flag(
                 environment_id=env.id,
                 enabled=False,
                 off_variation=off,
+                prerequisites=[],
                 targets=[],
                 rules=[],
                 fallthrough={"variation": default},
@@ -184,7 +226,7 @@ def update_config(
     if unknown:
         raise NotFound(f"unknown config fields: {sorted(unknown)}")
     merged.update({k: v for k, v in changes.items() if v is not None})
-    validate_config(merged, flag.variations, segment_keys(session, project.id))
+    check_config(session, project, flag, env, merged)
     if all(merged[k] == before[k] for k in CONFIG_FIELDS):
         return config
 
@@ -239,6 +281,12 @@ def archive_flag(
 ) -> Flag:
     if flag.archived:
         return flag
+    dependents = dependent_flags(session, project, flag)
+    if dependents:
+        raise Conflict(
+            f"flag {flag.key!r} is a prerequisite of {dependents}; remove it from them first",
+            code="flag_in_use",
+        )
     flag.archived = True
     flag.updated_at = now
     for env in project.environments:

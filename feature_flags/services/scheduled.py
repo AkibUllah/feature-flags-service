@@ -12,7 +12,6 @@ from feature_flags.models import Environment, Flag, Project, ScheduledChange
 from feature_flags.services import audit, flags
 from feature_flags.services.context import AppContext
 from feature_flags.services.errors import DomainError, NotFound
-from feature_flags.services.validation import validate_config
 
 
 def schedule(
@@ -36,7 +35,7 @@ def schedule(
     current = flags.config_snapshot(flags.get_config(flag, env))
     merged = {k: current[k] for k in flags.CONFIG_FIELDS}
     merged.update(changes)
-    validate_config(merged, flag.variations, flags.segment_keys(session, project.id))
+    flags.check_config(session, project, flag, env, merged)
     change = ScheduledChange(
         flag_id=flag.id,
         environment_id=env.id,
