@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -96,15 +96,26 @@ class FlagUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class Prerequisite(BaseModel):
+    flag_key: str = Field(min_length=1, max_length=100)
+    variation: str = Field(min_length=1, max_length=100)
+
+
 class FlagConfigOut(ORMModel):
     environment_id: str
     enabled: bool
     off_variation: str
+    prerequisites: list[Any] = Field(default_factory=list)
     targets: list[Any]
     rules: list[Any]
     fallthrough: dict[str, Any]
     version: int
     updated_at: datetime
+
+    @field_validator("prerequisites", mode="before")
+    @classmethod
+    def _none_is_empty(cls, value: Any) -> Any:
+        return [] if value is None else value  # rows saved before prerequisites existed
 
 
 class FlagOut(ORMModel):
@@ -127,9 +138,18 @@ class FlagDetail(FlagOut):
 class FlagConfigPatch(BaseModel):
     enabled: bool | None = None
     off_variation: str | None = None
+    prerequisites: list[Prerequisite] | None = Field(
+        default=None,
+        description="Flags that must be on and serve the given variation before this flag's "
+        "targets, rules and fallthrough apply; otherwise the off variation is served",
+    )
     targets: list[dict[str, Any]] | None = None
     rules: list[dict[str, Any]] | None = None
-    fallthrough: dict[str, Any] | None = None
+    fallthrough: dict[str, Any] | None = Field(
+        default=None,
+        description="{variation} or {rollout, bucket_by?, holdout?, experiment?}; rules take "
+        "the same rollout fields",
+    )
 
 
 class ScheduledChangeCreate(BaseModel):
