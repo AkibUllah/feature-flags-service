@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Prerequisite flags: `prerequisites: [{flag_key, variation}]` on each environment config. A flag whose prerequisite is off, missing or serves another variation returns its off variation with reason `PREREQUISITE_FAILED` and `prerequisite_key`. Saving rejects unknown or archived flags, unknown variations, self references, cycles (the error names the path) and chains deeper than 5 levels; archiving a flag returns `409 flag_in_use` while another flag depends on it. Prerequisites ship in the SDK payload so local evaluation agrees with the server (#2).
+- Experiment allocation with holdouts: rollouts accept `holdout` (weight, `10000` = 10%) and an optional `experiment` key. Holdout membership is bucketed with its own per-experiment seed, so held-out users get the off variation (`in_holdout: true`), the split of everyone else is unchanged, and flags sharing an experiment key hold out the same users (#2).
+- Shared evaluation vectors (`tests/vectors/evaluation.json`) with pinned bucketing hashes, replayed by the service, Python SDK and TypeScript SDK tests.
+- TypeScript SDK `EvaluationReason` includes `PREREQUISITE_FAILED`, `in_holdout`, `experiment` and `prerequisite_key`.
+
 - CodeQL analysis for Python, JavaScript/TypeScript and GitHub Actions on pushes and pull requests to `main` and on a weekly schedule.
 - Dependabot version updates for pip (service and Python SDK), npm (TypeScript SDK), Docker and GitHub Actions, with minor and patch updates grouped per ecosystem.
 - README screenshots: an evaluation session against a local API and the API reference.
@@ -17,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - CI workflow runs with a read-only `GITHUB_TOKEN`.
-- Test counts in the README now match the suite (88 service tests, 94 Python tests in total).
+- Test counts in the README now match the suite (152 service tests, 181 Python tests in total, 37 TypeScript SDK tests).
+- `flag_configs` has a new JSON column `prerequisites`. The schema is still created with `create_all`, so an existing database needs `ALTER TABLE flag_configs ADD COLUMN prerequisites JSON` until migrations land (#3).
 
 ## [0.1.0] - 2026-10-25
 
