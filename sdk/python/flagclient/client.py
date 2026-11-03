@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from feature_flags.core.clauses import Context
-from feature_flags.core.evaluate import EvalResult, evaluate
+from feature_flags.core.evaluate import EvalResult, evaluate, evaluate_all
 
 log = logging.getLogger(__name__)
 
@@ -123,10 +123,11 @@ class FlagClient:
         with self._lock:
             if self._payload is None:
                 return None
-            flag = self._payload["flags"].get(flag_key)
+            flags = self._payload["flags"]
+            flag = flags.get(flag_key)
             if flag is None:
                 return None
-            return evaluate(flag, ctx, self._payload.get("segments", {}))
+            return evaluate(flag, ctx, self._payload.get("segments", {}), flags)
 
     def variation(
         self, flag_key: str, context: Context | dict[str, Any] | str, default: Any
@@ -146,11 +147,8 @@ class FlagClient:
         with self._lock:
             if self._payload is None:
                 return {}
-            segments = self._payload.get("segments", {})
-            return {
-                key: evaluate(flag, ctx, segments).value
-                for key, flag in self._payload["flags"].items()
-            }
+            results = evaluate_all(self._payload["flags"], ctx, self._payload.get("segments", {}))
+            return {key: result.value for key, result in results.items()}
 
     def wait_until_ready(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout

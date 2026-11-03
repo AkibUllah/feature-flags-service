@@ -99,8 +99,13 @@ def _resolve(target: dict[str, Any], flag: dict[str, Any], context: Context) -> 
 
 
 def evaluate(
-    flag: dict[str, Any], context: Context, segments: dict[str, dict] | None = None
+    flag: dict[str, Any],
+    context: Context,
+    segments: dict[str, dict] | None = None,
+    flags: dict[str, dict[str, Any]] | None = None,
 ) -> EvalResult:
+    """Evaluate one flag. `flags` is the rest of the payload (every flag by key), which flags
+    that depend on other flags need; callers holding a full payload should always pass it."""
     segments = segments or {}
     version = int(flag.get("version", 0))
     off = flag.get("off_variation")
@@ -144,4 +149,4 @@ def evaluate(
 def evaluate_all(
     flags: dict[str, dict[str, Any]], context: Context, segments: dict[str, dict] | None = None
 ) -> dict[str, EvalResult]:
-    return {key: evaluate(flag, context, segments) for key, flag in flags.items()}
+    return {key: evaluate(flag, context, segments, flags) for key, flag in flags.items()}
