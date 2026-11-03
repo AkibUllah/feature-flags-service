@@ -39,9 +39,11 @@ Shipping a new checkout to a retail platform or a new KYC flow to a wallet app i
 - Flags of kind `boolean`, `string`, `number` or `json` with named variations; per-environment config (enabled, individual targets, rules, fallthrough, off variation) so prod and staging differ without copying flags
 - Targeting clauses: `eq`, `neq`, `in`, `contains`, `starts_with`, `ends_with`, `regex`, numeric `gt/gte/lt/lte`, `semver_eq/gt/gte/lt/lte`, `exists`, `in_segment`, each negatable; list-valued attributes match on any element
 - Percentage rollouts with sticky bucketing (SHA-256 of flag + salt + user key, optional `bucket_by` attribute); verified to stay within 2% of the configured split over 100,000 keys
+- Prerequisite flags: a flag only applies its targets, rules and fallthrough when each prerequisite flag is on and serves the required variation for the same context; otherwise it serves its off variation with reason `PREREQUISITE_FAILED` + `prerequisite_key`. Cycles, unknown or archived flags, unknown variations and chains deeper than 5 levels are rejected on save; a flag cannot be archived while another flag depends on it
+- Experiment allocation with holdouts: a rollout can carry a `holdout` weight and an `experiment` key. Holdout membership is hashed separately from the variation split (seeded by the experiment key, or the flag key + salt), so held-out users always get the off variation (`in_holdout: true`), everyone else keeps exactly the variation they had without a holdout, reweighting never moves anyone in or out, and flags sharing an experiment key hold out the same users
 - Segments (included / excluded keys + rules) shared across a project and referenced from rules; deletion is refused while a flag uses them
 - Kill switch (`/kill`, `/restore`) that serves the off variation without losing the rules; scheduled changes applied by a background sweep or on demand
-- `POST /v1/evaluate` for one or many flags with a reason (`OFF`, `TARGET_MATCH`, `RULE_MATCH` + rule id, `FALLTHROUGH` + rollout, `ERROR`); usage counters per flag, environment, variation and reason
+- `POST /v1/evaluate` for one or many flags with a reason (`OFF`, `PREREQUISITE_FAILED` + prerequisite key, `TARGET_MATCH`, `RULE_MATCH` + rule id, `FALLTHROUGH` + rollout / holdout / experiment, `ERROR`); usage counters per flag, environment, variation and reason
 - `GET /v1/sdk/flags` bulk payload with strong ETags and `304 Not Modified`; server keys get full targeting for local evaluation, client keys get values evaluated for their context so rules never reach a browser
 - `GET /v1/sdk/stream` Server-Sent Events with coalesced `put` events and keep-alive comments
 - Audit log (actor, action, before/after) for every change; HMAC-signed flag-change webhooks
@@ -77,7 +79,7 @@ Design notes:
 
 - **Evaluation is pure.** `core.evaluate.evaluate(flag_payload, context, segments)` has no I/O. The HTTP layer, the Python SDK and the 100k-key distribution test all call the same function, so there is exactly one definition of "what does this user get".
 - **Versions drive everything.** Each change bumps `FlagConfig.version` and the owning `Environment.version`. The payload cache key includes the environment version (so invalidation is a key change, not a race), the ETag is a hash of the payload, and SSE subscribers ignore events older than what they already sent.
-- **Precedence is fixed:** kill switch → individual targets → rules in order → fallthrough. Structural mistakes (a rule pointing at a deleted variation) are rejected on save, and if one slips through the evaluator returns the off variation with reason `ERROR` rather than raising into a request path.
+- **Precedence is fixed:** kill switch → prerequisites → individual targets → rules in order → fallthrough. Structural mistakes (a rule pointing at a deleted variation) are rejected on save, and if one slips through the evaluator returns the off variation with reason `ERROR` rather than raising into a request path.
 - **Client keys never see rules.** The same payload builder produces either the full config (server keys) or per-context evaluated values (client keys); the ETag for client payloads mixes in the context so two users never share a cached response.
 - **Time is injected.** Scheduled changes, audit timestamps and SDK-key usage all read the app clock; tests advance a `FixedClock` to make a change due.
 - **Redis is optional.** `KV` is a small protocol with Redis and memory implementations; a single instance runs with no Redis at all, and tests use `fakeredis`.
@@ -144,6 +146,23 @@ curl -s -X POST localhost:8000/v1/projects/shop/flags/new-checkout/environments/
 curl -sN localhost:8000/v1/sdk/stream -H "Authorization: Bearer srv-…"      # SSE: event: put …
 ```
 
+### Prerequisites and experiments
+
+`express-pay` only applies to users who get `new-checkout`; its fallthrough is a 50/50 experiment that holds out 10% of users (they get the off variation and stay out of the analysis):
+
+```bash
+curl -s -X PATCH localhost:8000/v1/projects/shop/flags/express-pay/environments/prod "${H[@]}" -d '{
+  "enabled": true,
+  "prerequisites": [{"flag_key":"new-checkout","variation":"on"}],
+  "fallthrough": {"experiment":"q4-checkout","holdout":10000,
+    "rollout":[{"variation":"on","weight":50000},{"variation":"off","weight":50000}]}}'
+# reasons: {"kind":"PREREQUISITE_FAILED","prerequisite_key":"new-checkout"}
+#          {"kind":"FALLTHROUGH","in_holdout":true,"experiment":"q4-checkout"}
+#          {"kind":"FALLTHROUGH","in_rollout":true,"experiment":"q4-checkout"}
+```
+
+Weights (`holdout` too) are in thousandths of a percent: `10000` is 10%. `holdout` and `experiment` are accepted on any rollout (rule or fallthrough) and rejected on a fixed variation. Prerequisite graphs are per environment. `tests/vectors/evaluation.json` holds shared evaluation vectors (plus pinned bucketing hashes) that the server, the Python SDK and the TypeScript SDK tests all replay.
+
 ### SDKs
 
 Python (server-side, local evaluation):
@@ -178,8 +197,8 @@ Management routes require `X-API-Key` (when `ADMIN_API_KEY` is set) and accept `
 | `POST` | `/v1/projects/{p}/environments` | Add an environment |
 | `POST` · `GET` · `DELETE` | `/v1/projects/{p}/environments/{e}/sdk-keys[/{id}]` | Create (plaintext shown once) / list / revoke |
 | `POST` · `GET` | `/v1/projects/{p}/flags` | Create (kind, variations, tags) / list (`tag`, `include_archived`) |
-| `GET` · `PATCH` · `DELETE` | `/v1/projects/{p}/flags/{f}` | Detail with all environment configs / metadata / archive |
-| `GET` · `PATCH` | `/v1/projects/{p}/flags/{f}/environments/{e}` | Read / patch `enabled`, `off_variation`, `targets`, `rules`, `fallthrough` |
+| `GET` · `PATCH` · `DELETE` | `/v1/projects/{p}/flags/{f}` | Detail with all environment configs / metadata / archive (`409 flag_in_use` while it is a prerequisite) |
+| `GET` · `PATCH` | `/v1/projects/{p}/flags/{f}/environments/{e}` | Read / patch `enabled`, `off_variation`, `prerequisites`, `targets`, `rules`, `fallthrough` (rollouts take `holdout`, `experiment`) |
 | `POST` | `…/environments/{e}/kill` · `/restore` | Kill switch on / off |
 | `POST` · `GET` · `DELETE` | `…/environments/{e}/schedule` · `/flags/{f}/schedule[/{id}]` | Schedule a config patch / list / cancel |
 | `POST` | `/v1/scheduled-changes/apply` | Apply due changes now |
@@ -211,24 +230,24 @@ feature_flags/
 └── api/                    # admin.py, sdk.py (evaluate, flags, stream)
 sdk/python/flagclient/      # FlagClient: refresh/poll with ETag, variation(), all_flags()
 sdk/typescript/src/         # FlagClient: init/identify/on('change'), SSE, bootstrap
-tests/                      # 88 service tests · sdk/python/tests: 6 · sdk/typescript/tests: 13
+tests/                      # 152 service tests · sdk/python/tests: 29 · sdk/typescript/tests: 37
+tests/vectors/              # shared evaluation vectors replayed by all three suites
 ```
 
 ## Testing
 
 ```bash
-make test        # 94 Python tests (service + Python SDK), in-memory SQLite + fakeredis
-make cov         # with coverage (94% at the time of writing)
+make test        # 181 Python tests (service + Python SDK), in-memory SQLite + fakeredis
+make cov         # with coverage (95% at the time of writing)
 make lint        # ruff
-make sdk-ts      # eslint + tsc --noEmit + vitest (13 tests) + tsup build
+make sdk-ts      # eslint + tsc --noEmit + vitest (37 tests) + tsup build
 ```
 
-Covered: semver parsing and ordering incl. pre-releases; every clause operator, negation, list attributes and missing attributes; bucketing determinism, decorrelation across flags/salts, `bucket_by`, and the 10/30/60 split within 2% over 100k keys; evaluator precedence, segments (include/exclude/rules/negated), rollouts, multivariate values and error fallback; KV backends (memory + fakeredis) and usage counters; project/environment/SDK-key lifecycle with hashing and revocation; config validation errors; version bumps, cache invalidation and audit before/after; kill switch; segment effects on all environments and in-use protection; scheduled changes applied only when due and never twice; signed webhooks incl. failure recording; the SSE generator (initial put, heartbeat, coalescing, stale events, disconnect) and the HTTP stream; the full HTTP API including ETag/304 for server and client keys, context encoding, stats and auth; the Python SDK (ETag round trip, errors keep last payload, callbacks); the TypeScript SDK (encoding, bootstrap, ETag, change diffing, SSE put/error, identify, polling timers, unsubscribe).
+Covered: semver parsing and ordering incl. pre-releases; every clause operator, negation, list attributes and missing attributes; bucketing determinism, decorrelation across flags/salts, `bucket_by`, and the 10/30/60 split within 2% over 100k keys; evaluator precedence, segments (include/exclude/rules/negated), rollouts, multivariate values and error fallback; prerequisites (met, failed, chains, switched-off and missing prerequisites, cycles and the depth limit) and holdouts (ratio over 50k keys, monotonic growth, independence from the variation split, shared experiment keys, `bucket_by`); prerequisite validation on save (unknown/archived flags, unknown variations, cycles with their path, depth incl. dependents, per-environment graphs, archive guard, scheduled changes); shared evaluation vectors through the core evaluator, client payloads, the Python SDK and the TypeScript SDK; KV backends (memory + fakeredis) and usage counters; project/environment/SDK-key lifecycle with hashing and revocation; config validation errors; version bumps, cache invalidation and audit before/after; kill switch; segment effects on all environments and in-use protection; scheduled changes applied only when due and never twice; signed webhooks incl. failure recording; the SSE generator (initial put, heartbeat, coalescing, stale events, disconnect) and the HTTP stream; the full HTTP API including ETag/304 for server and client keys, context encoding, stats and auth; the Python SDK (ETag round trip, errors keep last payload, callbacks); the TypeScript SDK (encoding, bootstrap, ETag, change diffing, SSE put/error, identify, polling timers, unsubscribe).
 
 ## Roadmap
 
 - [ ] Redis pub/sub behind `EventBus` so SSE works across several API replicas (#1)
-- [ ] Prerequisite flags (flag B only on when flag A is on) and experiment allocation with holdouts (#2)
 - [ ] Alembic migrations (schema is created with `create_all` today) (#3)
 - [ ] Per-key rate limiting on `/v1/evaluate` and payload compression for very large projects (#4)
 - [ ] A small React admin UI over the management API (#5)
