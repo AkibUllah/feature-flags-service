@@ -1,10 +1,16 @@
 export type FlagValue = boolean | string | number | Record<string, unknown> | unknown[] | null;
 
 export interface EvaluationReason {
-  kind: "OFF" | "TARGET_MATCH" | "RULE_MATCH" | "FALLTHROUGH" | "ERROR";
+  kind: "OFF" | "PREREQUISITE_FAILED" | "TARGET_MATCH" | "RULE_MATCH" | "FALLTHROUGH" | "ERROR";
   rule_id?: string;
   rule_index?: number;
   in_rollout?: boolean;
+  /** Held out of an experiment: the off variation is served and the context is excluded from analysis. */
+  in_holdout?: boolean;
+  /** Experiment key of the rollout that allocated this context, when it has one. */
+  experiment?: string;
+  /** With PREREQUISITE_FAILED: the prerequisite flag that was not met. */
+  prerequisite_key?: string;
   error?: string;
 }
 
