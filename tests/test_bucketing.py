@@ -1,6 +1,14 @@
 import pytest
 
-from feature_flags.core.bucketing import WEIGHT_TOTAL, bucket, pick_variation, validate_rollout
+from feature_flags.core.bucketing import (
+    WEIGHT_TOTAL,
+    bucket,
+    holdout_seed,
+    in_holdout,
+    pick_variation,
+    validate_holdout,
+    validate_rollout,
+)
 from feature_flags.core.clauses import Context
 
 ROLLOUT = [{"variation": "on", "weight": 50_000}, {"variation": "off", "weight": 50_000}]
@@ -56,3 +64,61 @@ def test_rollout_validation():
         validate_rollout(
             [{"variation": "on", "weight": -1}, {"variation": "off", "weight": WEIGHT_TOTAL + 1}]
         )
+
+
+USERS = [Context(f"user-{i}") for i in range(50_000)]
+
+
+def held_out(holdout, seed, users=USERS, bucket_by="key"):
+    return {u.key for u in users if in_holdout(holdout, seed, u, bucket_by)}
+
+
+def test_holdout_ratio_within_one_percent_over_50k_keys():
+    for holdout in (1_000, 5_000, 20_000):
+        share = len(held_out(holdout, holdout_seed("exp", "salt"))) / len(USERS)
+        assert abs(share - holdout / WEIGHT_TOTAL) < 0.01
+
+
+def test_holdout_is_sticky_and_grows_monotonically():
+    seed = holdout_seed("exp", "salt")
+    five, ten = held_out(5_000, seed), held_out(10_000, seed)
+    assert five < ten  # widening the holdout keeps everyone already held out
+    assert held_out(5_000, seed) == five
+    assert held_out(0, seed) == set()
+
+
+def test_holdout_is_independent_of_the_variation_split():
+    seed = holdout_seed("exp", "salt")
+    holdout = held_out(10_000, seed)
+    in_on = {u.key for u in USERS if pick_variation(ROLLOUT, "exp", "salt", u) == "on"}
+    # the holdout cuts both arms at roughly the holdout rate instead of eating one of them
+    assert abs(len(holdout & in_on) / len(in_on) - 0.10) < 0.01
+    assert abs(len(holdout - in_on) / (len(USERS) - len(in_on)) - 0.10) < 0.01
+
+
+def test_holdout_seed_is_per_experiment():
+    shared = holdout_seed("flag-a", "s1", "q4-checkout")
+    assert shared == holdout_seed("flag-b", "s2", "q4-checkout")
+    a = held_out(10_000, holdout_seed("flag-a", "s1"))
+    b = held_out(10_000, holdout_seed("flag-b", "s2"))
+    other = held_out(10_000, holdout_seed("flag-a", "s1", "q1-search"))
+    # unrelated experiments overlap only by chance (~10% of 10%)
+    assert len(a & b) / len(a) < 0.15
+    assert len(a & other) / len(a) < 0.15
+    # and the holdout point is not the variation point
+    assert bucket("holdout", shared, USERS[0]) != bucket("flag-a", "s1", USERS[0])
+
+
+def test_holdout_honours_bucket_by():
+    team = [Context(f"u{i}", {"team": "alpha"}) for i in range(200)]
+    seed = holdout_seed("exp", "salt")
+    results = {in_holdout(50_000, seed, c, bucket_by="team") for c in team}
+    assert len(results) == 1
+
+
+def test_holdout_validation():
+    validate_holdout(0)
+    validate_holdout(WEIGHT_TOTAL - 1)
+    for bad in (-1, WEIGHT_TOTAL, 2.5, "5000", True, None):
+        with pytest.raises(ValueError):
+            validate_holdout(bad)

@@ -8,6 +8,10 @@ Precedence (first hit wins):
 4. rules in order (clauses AND-ed)        -> reason RULE_MATCH (+ rule id / index)
 5. fallthrough variation or rollout       -> reason FALLTHROUGH (+ in_rollout)
 
+A rollout (on a rule or the fallthrough) may be an experiment with a `holdout` weight and
+an optional `experiment` key. Held-out contexts get the off variation with `in_holdout`
+in the reason (kind stays RULE_MATCH / FALLTHROUGH); see `bucketing` for the guarantees.
+
 A prerequisite `{"flag_key", "variation"}` is met when that flag is on and evaluates, for
 the same context, to that variation. Prerequisites are evaluated recursively against the
 `flags` map; a missing prerequisite flag is simply not met.
@@ -22,7 +26,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from feature_flags.core.bucketing import pick_variation
+from feature_flags.core.bucketing import holdout_seed, in_holdout, pick_variation
 from feature_flags.core.clauses import Context, clause_matches
 
 MAX_PREREQUISITE_DEPTH = 5  # how many levels of prerequisites a flag may sit on top of
@@ -34,6 +38,8 @@ class Reason:
     rule_id: str | None = None
     rule_index: int | None = None
     in_rollout: bool = False
+    in_holdout: bool = False
+    experiment: str | None = None
     prerequisite_key: str | None = None
     error: str | None = None
 
@@ -97,19 +103,24 @@ def _clause_holds(clause: dict[str, Any], context: Context, segments: dict[str, 
     return clause_matches(clause, context)
 
 
-def _resolve(target: dict[str, Any], flag: dict[str, Any], context: Context) -> tuple[str, bool]:
-    """A rule or fallthrough points at a fixed variation or at a rollout."""
+def _resolve(
+    target: dict[str, Any], flag: dict[str, Any], context: Context
+) -> tuple[str | None, dict[str, Any]]:
+    """A rule or fallthrough points at a fixed variation or at a rollout. Returns the
+    variation and the reason fields it implies (in_rollout / in_holdout / experiment)."""
     if target.get("rollout"):
-        rollout = target["rollout"]
-        return (
-            pick_variation(
-                rollout, flag["key"], flag.get("salt", ""), context, target.get("bucket_by", "key")
-            ),
-            True,
-        )
+        salt = flag.get("salt", "")
+        bucket_by = target.get("bucket_by", "key")
+        experiment = target.get("experiment")
+        extra: dict[str, Any] = {"experiment": experiment} if experiment else {}
+        seed = holdout_seed(flag["key"], salt, experiment)
+        if in_holdout(int(target.get("holdout") or 0), seed, context, bucket_by):
+            return flag.get("off_variation"), {**extra, "in_holdout": True}
+        variation = pick_variation(target["rollout"], flag["key"], salt, context, bucket_by)
+        return variation, {**extra, "in_rollout": True}
     if target.get("variation") is None:
         raise EvaluationError("rule has neither variation nor rollout")
-    return target["variation"], False
+    return target["variation"], {}
 
 
 def _failed_prerequisite(
@@ -181,20 +192,15 @@ def _evaluate(
         for index, rule in enumerate(flag.get("rules", [])):
             clauses = rule.get("clauses", [])
             if clauses and all(_clause_holds(c, context, segments) for c in clauses):
-                variation, in_rollout = _resolve(rule, flag, context)
+                variation, extra = _resolve(rule, flag, context)
                 return result(
                     variation,
-                    Reason(
-                        "RULE_MATCH",
-                        rule_id=rule.get("id"),
-                        rule_index=index,
-                        in_rollout=in_rollout,
-                    ),
+                    Reason("RULE_MATCH", rule_id=rule.get("id"), rule_index=index, **extra),
                 )
 
         fallthrough = flag.get("fallthrough") or {"variation": off}
-        variation, in_rollout = _resolve(fallthrough, flag, context)
-        return result(variation, Reason("FALLTHROUGH", in_rollout=in_rollout))
+        variation, extra = _resolve(fallthrough, flag, context)
+        return result(variation, Reason("FALLTHROUGH", **extra))
     except (EvaluationError, KeyError, TypeError, ValueError) as exc:
         if chain and isinstance(exc, PrerequisiteChainError):
             raise  # surface on the flag that was asked for, not on a prerequisite

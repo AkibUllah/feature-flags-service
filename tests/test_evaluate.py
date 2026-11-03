@@ -345,3 +345,100 @@ def test_evaluate_all_resolves_prerequisites_from_the_same_map():
         "checkout-v2": "PREREQUISITE_FAILED",
         "express-pay": "PREREQUISITE_FAILED",
     }
+
+
+# --- experiments with holdouts ----------------------------------------------------------------
+
+
+def experiment_flag(holdout=10_000, experiment=None, **overrides):
+    rollout = {
+        "rollout": [
+            {"variation": "on", "weight": 50_000},
+            {"variation": "off", "weight": 50_000},
+        ],
+        "holdout": holdout,
+    }
+    if experiment:
+        rollout["experiment"] = experiment
+    return flag(
+        kind="string",
+        variations=[
+            {"key": "control", "value": "classic"},
+            {"key": "on", "value": "one-page"},
+            {"key": "off", "value": "two-step"},
+        ],
+        off_variation="control",
+        fallthrough=rollout,
+        **overrides,
+    )
+
+
+def test_holdout_serves_off_variation_with_reason():
+    f = experiment_flag(experiment="q4-checkout")
+    results = [evaluate(f, Context(f"user-{i}")) for i in range(5_000)]
+    held = [r for r in results if r.reason.in_holdout]
+    assert abs(len(held) / len(results) - 0.10) < 0.02
+    assert {r.variation for r in held} == {"control"}
+    assert held[0].as_dict()["reason"] == {
+        "kind": "FALLTHROUGH",
+        "in_holdout": True,
+        "experiment": "q4-checkout",
+    }
+    rest = [r for r in results if not r.reason.in_holdout]
+    assert {r.variation for r in rest} == {"on", "off"}
+    assert all(r.reason.in_rollout for r in rest)
+
+
+def test_users_outside_the_holdout_keep_their_variation():
+    without = experiment_flag(holdout=0)
+    with_holdout = experiment_flag(holdout=20_000)
+    for i in range(2_000):
+        ctx = Context(f"user-{i}")
+        r = evaluate(with_holdout, ctx)
+        if not r.reason.in_holdout:
+            assert r.variation == evaluate(without, ctx).variation
+
+
+def test_holdout_membership_survives_weight_changes():
+    f = experiment_flag()
+    reweighted = experiment_flag()
+    reweighted["fallthrough"]["rollout"] = [
+        {"variation": "on", "weight": 90_000},
+        {"variation": "off", "weight": 10_000},
+    ]
+    for i in range(2_000):
+        ctx = Context(f"user-{i}")
+        assert evaluate(f, ctx).reason.in_holdout == evaluate(reweighted, ctx).reason.in_holdout
+
+
+def test_flags_sharing_an_experiment_hold_out_the_same_users():
+    a = experiment_flag(experiment="q4-checkout")
+    b = experiment_flag(experiment="q4-checkout", key="checkout-copy", salt="xyz")
+    c = experiment_flag(key="checkout-copy", salt="xyz")
+    same = different = 0
+    for i in range(2_000):
+        ctx = Context(f"user-{i}")
+        held_a = evaluate(a, ctx).reason.in_holdout
+        assert held_a == evaluate(b, ctx).reason.in_holdout
+        same += held_a
+        different += held_a and evaluate(c, ctx).reason.in_holdout
+    assert same > 100 and different < same / 2
+
+
+def test_holdout_on_a_rule_rollout_keeps_rule_reason():
+    f = experiment_flag(holdout=99_999)
+    f["rules"] = [{**bd_rule(), "variation": None, **f["fallthrough"]}]
+    r = evaluate(f, Context("u", {"country": "BD"}))
+    assert r.variation == "control"
+    assert r.as_dict()["reason"] == {
+        "kind": "RULE_MATCH",
+        "rule_id": "bd",
+        "rule_index": 0,
+        "in_holdout": True,
+    }
+
+
+def test_malformed_holdout_is_an_error():
+    f = experiment_flag(holdout="lots")
+    r = evaluate(f, Context("u"))
+    assert (r.variation, r.reason.kind) == ("control", "ERROR")
