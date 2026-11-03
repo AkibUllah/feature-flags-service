@@ -3,12 +3,18 @@
 Precedence (first hit wins):
 
 1. flag disabled (kill switch)            -> off variation, reason OFF
-2. individual targets                     -> reason TARGET_MATCH
-3. rules in order (clauses AND-ed)        -> reason RULE_MATCH (+ rule id / index)
-4. fallthrough variation or rollout       -> reason FALLTHROUGH (+ in_rollout)
+2. a prerequisite not met                 -> off variation, reason PREREQUISITE_FAILED
+3. individual targets                     -> reason TARGET_MATCH
+4. rules in order (clauses AND-ed)        -> reason RULE_MATCH (+ rule id / index)
+5. fallthrough variation or rollout       -> reason FALLTHROUGH (+ in_rollout)
 
-Any structural problem (unknown variation, bad rollout) yields the off variation with
-reason ERROR instead of raising, so a mis-saved flag can never take down a caller.
+A prerequisite `{"flag_key", "variation"}` is met when that flag is on and evaluates, for
+the same context, to that variation. Prerequisites are evaluated recursively against the
+`flags` map; a missing prerequisite flag is simply not met.
+
+Any structural problem (unknown variation, bad rollout, a prerequisite cycle or a chain
+deeper than MAX_PREREQUISITE_DEPTH) yields the off variation with reason ERROR instead of
+raising, so a mis-saved flag can never take down a caller.
 """
 
 from __future__ import annotations
@@ -19,6 +25,8 @@ from typing import Any
 from feature_flags.core.bucketing import pick_variation
 from feature_flags.core.clauses import Context, clause_matches
 
+MAX_PREREQUISITE_DEPTH = 5  # how many levels of prerequisites a flag may sit on top of
+
 
 @dataclass(frozen=True)
 class Reason:
@@ -26,6 +34,7 @@ class Reason:
     rule_id: str | None = None
     rule_index: int | None = None
     in_rollout: bool = False
+    prerequisite_key: str | None = None
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -52,6 +61,11 @@ class EvalResult:
 
 class EvaluationError(Exception):
     pass
+
+
+class PrerequisiteChainError(EvaluationError):
+    """A prerequisite cycle or an over-deep chain. Reported as ERROR on the flag that was
+    asked for rather than as a failed prerequisite somewhere down the chain."""
 
 
 def _variation_value(flag: dict[str, Any], variation: str) -> Any:
@@ -98,6 +112,35 @@ def _resolve(target: dict[str, Any], flag: dict[str, Any], context: Context) -> 
     return target["variation"], False
 
 
+def _failed_prerequisite(
+    flag: dict[str, Any],
+    context: Context,
+    segments: dict[str, dict],
+    flags: dict[str, dict[str, Any]],
+    chain: tuple[str, ...],
+) -> str | None:
+    """Key of the first prerequisite that is not met, or None when all are."""
+    path = (*chain, flag["key"])
+    for prerequisite in flag.get("prerequisites", []):
+        key = prerequisite["flag_key"]
+        if key in path:
+            raise PrerequisiteChainError(f"prerequisite cycle: {' -> '.join((*path, key))}")
+        if len(path) > MAX_PREREQUISITE_DEPTH:
+            raise PrerequisiteChainError(
+                f"prerequisites nested deeper than {MAX_PREREQUISITE_DEPTH} levels"
+            )
+        required = flags.get(key)
+        if required is None:
+            return key
+        outcome = _evaluate(required, context, segments, flags, path)
+        if (
+            outcome.reason.kind in ("OFF", "ERROR")
+            or outcome.variation != prerequisite["variation"]
+        ):
+            return key
+    return None
+
+
 def evaluate(
     flag: dict[str, Any],
     context: Context,
@@ -106,7 +149,16 @@ def evaluate(
 ) -> EvalResult:
     """Evaluate one flag. `flags` is the rest of the payload (every flag by key), which flags
     that depend on other flags need; callers holding a full payload should always pass it."""
-    segments = segments or {}
+    return _evaluate(flag, context, segments or {}, flags or {}, ())
+
+
+def _evaluate(
+    flag: dict[str, Any],
+    context: Context,
+    segments: dict[str, dict],
+    flags: dict[str, dict[str, Any]],
+    chain: tuple[str, ...],
+) -> EvalResult:
     version = int(flag.get("version", 0))
     off = flag.get("off_variation")
 
@@ -117,6 +169,10 @@ def evaluate(
     try:
         if not flag.get("enabled", False):
             return result(off, Reason("OFF"))
+
+        failed = _failed_prerequisite(flag, context, segments, flags, chain)
+        if failed is not None:
+            return result(off, Reason("PREREQUISITE_FAILED", prerequisite_key=failed))
 
         for target in flag.get("targets", []):
             if context.key in target.get("keys", []):
@@ -140,6 +196,8 @@ def evaluate(
         variation, in_rollout = _resolve(fallthrough, flag, context)
         return result(variation, Reason("FALLTHROUGH", in_rollout=in_rollout))
     except (EvaluationError, KeyError, TypeError, ValueError) as exc:
+        if chain and isinstance(exc, PrerequisiteChainError):
+            raise  # surface on the flag that was asked for, not on a prerequisite
         try:
             return result(off, Reason("ERROR", error=str(exc)))
         except EvaluationError:

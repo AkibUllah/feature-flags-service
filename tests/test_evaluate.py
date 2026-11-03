@@ -1,5 +1,10 @@
 from feature_flags.core.clauses import Context
-from feature_flags.core.evaluate import evaluate, evaluate_all, segment_matches
+from feature_flags.core.evaluate import (
+    MAX_PREREQUISITE_DEPTH,
+    evaluate,
+    evaluate_all,
+    segment_matches,
+)
 
 
 def flag(**overrides):
@@ -181,3 +186,162 @@ def test_evaluate_all():
     flags = {"a": flag(key="a"), "b": flag(key="b", enabled=False)}
     results = evaluate_all(flags, Context("u"))
     assert {k: r.reason.kind for k, r in results.items()} == {"a": "FALLTHROUGH", "b": "OFF"}
+
+
+# --- prerequisites --------------------------------------------------------------------------
+
+
+def bd_rule(variation="on"):
+    return {
+        "id": "bd",
+        "clauses": [{"attribute": "country", "op": "eq", "values": ["BD"]}],
+        "variation": variation,
+    }
+
+
+def prereq_flags():
+    """checkout-v2 needs new-checkout == on; express-pay needs checkout-v2 == on."""
+    return {
+        "new-checkout": flag(rules=[bd_rule()]),
+        "checkout-v2": flag(
+            key="checkout-v2",
+            prerequisites=[{"flag_key": "new-checkout", "variation": "on"}],
+            fallthrough={"variation": "on"},
+        ),
+        "express-pay": flag(
+            key="express-pay",
+            prerequisites=[{"flag_key": "checkout-v2", "variation": "on"}],
+            fallthrough={"variation": "on"},
+        ),
+    }
+
+
+def test_prerequisite_met_lets_the_flag_evaluate_normally():
+    flags = prereq_flags()
+    r = evaluate(flags["checkout-v2"], Context("u", {"country": "BD"}), {}, flags)
+    assert (r.variation, r.reason.kind) == ("on", "FALLTHROUGH")
+
+
+def test_prerequisite_not_met_serves_off_with_reason():
+    flags = prereq_flags()
+    r = evaluate(flags["checkout-v2"], Context("u", {"country": "IN"}), {}, flags)
+    assert (r.variation, r.value, r.reason.kind) == ("off", False, "PREREQUISITE_FAILED")
+    assert r.as_dict()["reason"] == {
+        "kind": "PREREQUISITE_FAILED",
+        "prerequisite_key": "new-checkout",
+    }
+
+
+def test_prerequisite_chain_reports_the_direct_prerequisite():
+    flags = prereq_flags()
+    assert evaluate(flags["express-pay"], Context("u", {"country": "BD"}), {}, flags).value is True
+    r = evaluate(flags["express-pay"], Context("u", {"country": "IN"}), {}, flags)
+    assert (r.reason.kind, r.reason.prerequisite_key) == ("PREREQUISITE_FAILED", "checkout-v2")
+
+
+def test_prerequisite_that_is_switched_off_is_not_met_even_on_its_off_variation():
+    flags = prereq_flags()
+    flags["new-checkout"]["enabled"] = False
+    flags["checkout-v2"]["prerequisites"] = [{"flag_key": "new-checkout", "variation": "off"}]
+    r = evaluate(flags["checkout-v2"], Context("u"), {}, flags)
+    assert r.reason.kind == "PREREQUISITE_FAILED"
+
+
+def test_prerequisite_can_require_a_specific_multivariate_variation():
+    flags = {
+        "theme": flag(
+            key="theme",
+            kind="string",
+            variations=[{"key": "dark", "value": "dark"}, {"key": "light", "value": "light"}],
+            off_variation="light",
+            targets=[{"variation": "dark", "keys": ["night-owl"]}],
+            fallthrough={"variation": "light"},
+        ),
+        "dark-charts": flag(
+            key="dark-charts",
+            prerequisites=[{"flag_key": "theme", "variation": "dark"}],
+            fallthrough={"variation": "on"},
+        ),
+    }
+    assert evaluate(flags["dark-charts"], Context("night-owl"), {}, flags).value is True
+    assert evaluate(flags["dark-charts"], Context("early-bird"), {}, flags).value is False
+
+
+def test_all_prerequisites_must_hold_and_first_failure_is_reported():
+    flags = prereq_flags()
+    flags["bundle"] = flag(
+        key="bundle",
+        prerequisites=[
+            {"flag_key": "new-checkout", "variation": "on"},
+            {"flag_key": "checkout-v2", "variation": "off"},
+        ],
+        fallthrough={"variation": "on"},
+    )
+    r = evaluate(flags["bundle"], Context("u", {"country": "BD"}), {}, flags)
+    assert (r.reason.kind, r.reason.prerequisite_key) == ("PREREQUISITE_FAILED", "checkout-v2")
+    r = evaluate(flags["bundle"], Context("u", {"country": "IN"}), {}, flags)
+    assert r.reason.prerequisite_key == "new-checkout"
+
+
+def test_kill_switch_beats_prerequisites_and_prerequisites_beat_targets():
+    flags = prereq_flags()
+    flags["checkout-v2"]["targets"] = [{"variation": "on", "keys": ["staff"]}]
+    r = evaluate(flags["checkout-v2"], Context("staff"), {}, flags)
+    assert r.reason.kind == "PREREQUISITE_FAILED"
+    flags["checkout-v2"]["enabled"] = False
+    assert evaluate(flags["checkout-v2"], Context("staff"), {}, flags).reason.kind == "OFF"
+
+
+def test_missing_or_broken_prerequisite_is_not_met():
+    flags = prereq_flags()
+    del flags["new-checkout"]
+    r = evaluate(flags["checkout-v2"], Context("u"), {}, flags)
+    assert (r.reason.kind, r.reason.prerequisite_key) == ("PREREQUISITE_FAILED", "new-checkout")
+    # without the flag map at all, nothing can be met
+    assert evaluate(prereq_flags()["checkout-v2"], Context("u")).reason.kind == (
+        "PREREQUISITE_FAILED"
+    )
+    flags = prereq_flags()
+    flags["new-checkout"]["fallthrough"] = {"variation": "gone"}
+    flags["checkout-v2"]["prerequisites"] = [{"flag_key": "new-checkout", "variation": "off"}]
+    r = evaluate(flags["checkout-v2"], Context("u", {"country": "IN"}), {}, flags)
+    assert r.reason.kind == "PREREQUISITE_FAILED"  # the prerequisite itself hit ERROR
+
+
+def test_prerequisite_cycle_is_an_error_on_the_requested_flag():
+    flags = prereq_flags()
+    flags["new-checkout"]["prerequisites"] = [{"flag_key": "express-pay", "variation": "on"}]
+    r = evaluate(flags["checkout-v2"], Context("u", {"country": "BD"}), {}, flags)
+    assert (r.variation, r.reason.kind) == ("off", "ERROR")
+    assert "checkout-v2 -> new-checkout -> express-pay -> checkout-v2" in r.reason.error
+    itself = flag(prerequisites=[{"flag_key": "new-checkout", "variation": "on"}])
+    r = evaluate(itself, Context("u"), {}, {"new-checkout": itself})
+    assert r.reason.kind == "ERROR" and "cycle" in r.reason.error
+
+
+def test_prerequisite_depth_limit():
+    def chain(length):
+        flags = {"f0": flag(key="f0", fallthrough={"variation": "on"})}
+        for i in range(1, length + 1):
+            flags[f"f{i}"] = flag(
+                key=f"f{i}",
+                prerequisites=[{"flag_key": f"f{i - 1}", "variation": "on"}],
+                fallthrough={"variation": "on"},
+            )
+        return flags
+
+    ok = chain(MAX_PREREQUISITE_DEPTH)
+    r = evaluate(ok[f"f{MAX_PREREQUISITE_DEPTH}"], Context("u"), {}, ok)
+    assert (r.value, r.reason.kind) == (True, "FALLTHROUGH")
+    deep = chain(MAX_PREREQUISITE_DEPTH + 1)
+    r = evaluate(deep[f"f{MAX_PREREQUISITE_DEPTH + 1}"], Context("u"), {}, deep)
+    assert r.reason.kind == "ERROR" and "deeper than" in r.reason.error
+
+
+def test_evaluate_all_resolves_prerequisites_from_the_same_map():
+    results = evaluate_all(prereq_flags(), Context("u", {"country": "IN"}))
+    assert {k: r.reason.kind for k, r in results.items()} == {
+        "new-checkout": "FALLTHROUGH",
+        "checkout-v2": "PREREQUISITE_FAILED",
+        "express-pay": "PREREQUISITE_FAILED",
+    }
