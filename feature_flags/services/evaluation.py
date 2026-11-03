@@ -35,7 +35,7 @@ def evaluate_flags(
         keys = flag_keys
     results = []
     for key in keys:
-        result = evaluate(flags[key], context, payload["segments"])
+        result = evaluate(flags[key], context, payload["segments"], flags)
         stats.record(ctx.kv, env.id, key, result.variation, result.reason.kind, now)
         results.append(result)
     return results
