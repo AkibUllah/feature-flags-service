@@ -4,6 +4,14 @@ A context is hashed together with the flag key and a per-flag salt into a point 
 The same context always lands on the same point for a flag, so rollouts are sticky, and
 different flags use different points so a user in the 10% of flag A is not automatically in
 the 10% of flag B.
+
+Experiments can hold out a share of the traffic. Holdout membership is hashed separately
+from the variation split (seeded by the experiment key, or by the flag key and salt), so:
+
+- changing the variation weights never moves anyone into or out of the holdout,
+- users outside the holdout keep exactly the variation they had without one,
+- growing the holdout from 5% to 10% keeps the original 5% held out,
+- flags that share an experiment key hold out the same users.
 """
 
 from __future__ import annotations
@@ -24,6 +32,24 @@ def bucket(flag_key: str, salt: str, context: Context, bucket_by: str = "key") -
         value = context.key
     digest = hashlib.sha256(f"{flag_key}.{salt}.{value}".encode()).hexdigest()
     return int(digest[:_HASH_DIGITS], 16) / 16**_HASH_DIGITS
+
+
+def holdout_seed(flag_key: str, salt: str, experiment: str | None = None) -> str:
+    return f"experiment:{experiment}" if experiment else f"flag:{flag_key}.{salt}"
+
+
+def in_holdout(holdout: int, seed: str, context: Context, bucket_by: str = "key") -> bool:
+    """True when the context falls in the first `holdout` weight units of the holdout space."""
+    if holdout <= 0:
+        return False
+    return bucket("holdout", seed, context, bucket_by) * WEIGHT_TOTAL < holdout
+
+
+def validate_holdout(holdout: Any) -> None:
+    if isinstance(holdout, bool) or not isinstance(holdout, int):
+        raise ValueError("holdout must be an integer weight")
+    if not 0 <= holdout < WEIGHT_TOTAL:
+        raise ValueError(f"holdout must be >= 0 and < {WEIGHT_TOTAL}, got {holdout}")
 
 
 def validate_rollout(rollout: list[dict[str, Any]]) -> None:
