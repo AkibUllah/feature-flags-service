@@ -320,3 +320,86 @@ def test_sdk_key_listing_and_revocation(client):
         client.get("/v1/sdk/flags", headers={"Authorization": f"Bearer {server}"}).status_code
         == 401
     )
+
+
+def test_prerequisites_and_holdouts_via_api(client):
+    server, _ = setup_project(client, flag_rules=BD_RULE)
+    r = client.post(
+        "/v1/projects/shop/flags",
+        json={
+            "key": "express-pay",
+            "name": "Express pay",
+            "kind": "boolean",
+            "variations": BOOL_VARIATIONS,
+        },
+        headers=ADMIN,
+    )
+    assert r.status_code == 201, r.text
+    url = "/v1/projects/shop/flags/express-pay/environments/prod"
+    requires_checkout = [{"flag_key": "new-checkout", "variation": "on"}]
+    r = client.patch(
+        url,
+        json={"enabled": True, "prerequisites": requires_checkout},
+        headers=ADMIN,
+    )
+    assert r.status_code == 200, r.text
+    assert client.get(url, headers=ADMIN).json()["prerequisites"] == requires_checkout
+    detail = client.get("/v1/projects/shop/flags/new-checkout", headers=ADMIN).json()
+    assert detail["configs"]["prod"]["prerequisites"] == []
+
+    def evaluate(country):
+        r = client.post(
+            "/v1/evaluate",
+            json={
+                "context": {"key": "u1", "attributes": {"country": country}},
+                "flag": "express-pay",
+            },
+            headers={"Authorization": f"Bearer {server}"},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert evaluate("BD")["value"] is True
+    miss = evaluate("IN")
+    assert miss["value"] is False and miss["reason"] == {
+        "kind": "PREREQUISITE_FAILED",
+        "prerequisite_key": "new-checkout",
+    }
+    payload = client.get("/v1/sdk/flags", headers={"Authorization": f"Bearer {server}"}).json()
+    assert payload["flags"]["express-pay"]["prerequisites"] == requires_checkout
+
+    # cycles, unknown flags and malformed entries are rejected
+    r = client.patch(
+        "/v1/projects/shop/flags/new-checkout/environments/prod",
+        json={"prerequisites": [{"flag_key": "express-pay", "variation": "on"}]},
+        headers=ADMIN,
+    )
+    assert r.status_code == 400 and r.json()["error"]["code"] == "prerequisite_cycle"
+    r = client.patch(
+        url, json={"prerequisites": [{"flag_key": "ghost", "variation": "on"}]}, headers=ADMIN
+    )
+    assert r.status_code == 400 and r.json()["error"]["code"] == "unknown_flag"
+    r = client.patch(url, json={"prerequisites": [{"flag_key": "new-checkout"}]}, headers=ADMIN)
+    assert r.status_code == 422
+
+    # a prerequisite cannot be archived while used, and can be once released
+    r = client.delete("/v1/projects/shop/flags/new-checkout", headers=ADMIN)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "flag_in_use"
+    assert (
+        client.patch(url, json={"prerequisites": []}, headers=ADMIN).json()["prerequisites"] == []
+    )
+    assert evaluate("IN")["reason"]["kind"] == "FALLTHROUGH"
+
+    # holdouts ride on rollouts
+    split = [{"variation": "on", "weight": 50000}, {"variation": "off", "weight": 50000}]
+    r = client.patch(url, json={"fallthrough": {"variation": "on", "holdout": 5000}}, headers=ADMIN)
+    assert r.status_code == 400
+    r = client.patch(
+        url,
+        json={"fallthrough": {"rollout": split, "holdout": 99999, "experiment": "q4-pay"}},
+        headers=ADMIN,
+    )
+    assert r.status_code == 200, r.text
+    held = evaluate("IN")
+    assert held["variation"] == "off"
+    assert held["reason"] == {"kind": "FALLTHROUGH", "in_holdout": True, "experiment": "q4-pay"}
