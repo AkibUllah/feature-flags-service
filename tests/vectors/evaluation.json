@@ -1,0 +1,905 @@
+{
+  "description": "Shared evaluation vectors: every evaluator (server, Python SDK, any future local-evaluation SDK) must produce `expected` for each case from `flags` and `segments`. `hashes` pins the bucketing function: point = first 15 hex digits of sha256(input) / 16**15.",
+  "flags": {
+    "new-checkout": {
+      "key": "new-checkout",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [],
+      "targets": [],
+      "rules": [
+        {
+          "id": "bd",
+          "clauses": [
+            {
+              "attribute": "country",
+              "op": "eq",
+              "values": [
+                "BD"
+              ]
+            }
+          ],
+          "variation": "on"
+        }
+      ],
+      "fallthrough": {
+        "variation": "off"
+      },
+      "salt": "s-new-checkout"
+    },
+    "checkout-v2": {
+      "key": "checkout-v2",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "new-checkout",
+          "variation": "on"
+        }
+      ],
+      "targets": [
+        {
+          "variation": "on",
+          "keys": [
+            "staff-1"
+          ]
+        }
+      ],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-checkout-v2"
+    },
+    "express-pay": {
+      "key": "express-pay",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "checkout-v2",
+          "variation": "on"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-express-pay"
+    },
+    "maintenance": {
+      "key": "maintenance",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": false,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-maintenance"
+    },
+    "legacy-banner": {
+      "key": "legacy-banner",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "maintenance",
+          "variation": "off"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-legacy-banner"
+    },
+    "theme": {
+      "key": "theme",
+      "kind": "string",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "dark",
+          "value": "dark"
+        },
+        {
+          "key": "light",
+          "value": "light"
+        }
+      ],
+      "off_variation": "light",
+      "prerequisites": [],
+      "targets": [
+        {
+          "variation": "dark",
+          "keys": [
+            "night-owl"
+          ]
+        }
+      ],
+      "rules": [],
+      "fallthrough": {
+        "variation": "light"
+      },
+      "salt": "s-theme"
+    },
+    "dark-charts": {
+      "key": "dark-charts",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "theme",
+          "variation": "dark"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-dark-charts"
+    },
+    "orphan": {
+      "key": "orphan",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "deleted-flag",
+          "variation": "on"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-orphan"
+    },
+    "loop-a": {
+      "key": "loop-a",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "loop-b",
+          "variation": "on"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-loop-a"
+    },
+    "loop-b": {
+      "key": "loop-b",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "loop-a",
+          "variation": "on"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "variation": "on"
+      },
+      "salt": "s-loop-b"
+    },
+    "checkout-copy": {
+      "key": "checkout-copy",
+      "kind": "string",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "control",
+          "value": "Pay now"
+        },
+        {
+          "key": "short",
+          "value": "Pay"
+        },
+        {
+          "key": "friendly",
+          "value": "Let's pay"
+        }
+      ],
+      "off_variation": "control",
+      "prerequisites": [],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "rollout": [
+          {
+            "variation": "short",
+            "weight": 50000
+          },
+          {
+            "variation": "friendly",
+            "weight": 50000
+          }
+        ],
+        "holdout": 20000,
+        "experiment": "q4-checkout"
+      },
+      "salt": "s-checkout-copy"
+    },
+    "checkout-banner": {
+      "key": "checkout-banner",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "rollout": [
+          {
+            "variation": "on",
+            "weight": 50000
+          },
+          {
+            "variation": "off",
+            "weight": 50000
+          }
+        ],
+        "holdout": 20000,
+        "experiment": "q4-checkout"
+      },
+      "salt": "s-checkout-banner"
+    },
+    "search-ranking": {
+      "key": "search-ranking",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [],
+      "targets": [],
+      "rules": [
+        {
+          "id": "bd-teams",
+          "clauses": [
+            {
+              "attribute": "country",
+              "op": "eq",
+              "values": [
+                "BD"
+              ]
+            }
+          ],
+          "rollout": [
+            {
+              "variation": "on",
+              "weight": 50000
+            },
+            {
+              "variation": "off",
+              "weight": 50000
+            }
+          ],
+          "holdout": 30000,
+          "bucket_by": "company"
+        }
+      ],
+      "fallthrough": {
+        "variation": "off"
+      },
+      "salt": "s-search-ranking"
+    },
+    "gated-experiment": {
+      "key": "gated-experiment",
+      "kind": "boolean",
+      "version": 1,
+      "enabled": true,
+      "variations": [
+        {
+          "key": "on",
+          "value": true
+        },
+        {
+          "key": "off",
+          "value": false
+        }
+      ],
+      "off_variation": "off",
+      "prerequisites": [
+        {
+          "flag_key": "new-checkout",
+          "variation": "on"
+        }
+      ],
+      "targets": [],
+      "rules": [],
+      "fallthrough": {
+        "rollout": [
+          {
+            "variation": "on",
+            "weight": 50000
+          },
+          {
+            "variation": "off",
+            "weight": 50000
+          }
+        ],
+        "holdout": 25000
+      },
+      "salt": "s-gated-experiment"
+    }
+  },
+  "segments": {},
+  "hashes": [
+    {
+      "input": "checkout-banner.s-checkout-banner.user-1",
+      "flag_key": "checkout-banner",
+      "salt": "s-checkout-banner",
+      "value": "user-1",
+      "point": 0.4823495754953353
+    },
+    {
+      "input": "new-checkout.abc.user-42",
+      "flag_key": "new-checkout",
+      "salt": "abc",
+      "value": "user-42",
+      "point": 0.9478344065881099
+    },
+    {
+      "input": "holdout.experiment:q4-checkout.user-1",
+      "flag_key": "holdout",
+      "salt": "experiment:q4-checkout",
+      "value": "user-1",
+      "point": 0.31333686519671694
+    },
+    {
+      "input": "holdout.flag:gated-experiment.s-gated-experiment.user-1",
+      "flag_key": "holdout",
+      "salt": "flag:gated-experiment.s-gated-experiment",
+      "value": "user-1",
+      "point": 0.9879294154492284
+    }
+  ],
+  "cases": [
+    {
+      "name": "plain rule match on the prerequisite itself",
+      "flag": "new-checkout",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "country": "BD"
+        }
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "RULE_MATCH",
+          "rule_id": "bd",
+          "rule_index": 0
+        }
+      }
+    },
+    {
+      "name": "prerequisite met: flag evaluates normally",
+      "flag": "checkout-v2",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "country": "BD"
+        }
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "FALLTHROUGH"
+        }
+      }
+    },
+    {
+      "name": "prerequisite not met: off variation",
+      "flag": "checkout-v2",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "country": "IN"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "new-checkout"
+        }
+      }
+    },
+    {
+      "name": "prerequisites are checked before individual targets",
+      "flag": "checkout-v2",
+      "context": {
+        "key": "staff-1",
+        "attributes": {
+          "country": "IN"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "new-checkout"
+        }
+      }
+    },
+    {
+      "name": "chain met",
+      "flag": "express-pay",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "country": "BD"
+        }
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "FALLTHROUGH"
+        }
+      }
+    },
+    {
+      "name": "chain broken one level down reports the direct prerequisite",
+      "flag": "express-pay",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "country": "IN"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "checkout-v2"
+        }
+      }
+    },
+    {
+      "name": "switched-off prerequisite is never met",
+      "flag": "legacy-banner",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "maintenance"
+        }
+      }
+    },
+    {
+      "name": "multivariate prerequisite met",
+      "flag": "dark-charts",
+      "context": {
+        "key": "night-owl",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "FALLTHROUGH"
+        }
+      }
+    },
+    {
+      "name": "multivariate prerequisite not met",
+      "flag": "dark-charts",
+      "context": {
+        "key": "early-bird",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "theme"
+        }
+      }
+    },
+    {
+      "name": "missing prerequisite flag is not met",
+      "flag": "orphan",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "deleted-flag"
+        }
+      }
+    },
+    {
+      "name": "prerequisite cycle is an error",
+      "flag": "loop-a",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "ERROR",
+          "error": "prerequisite cycle: loop-a -> loop-b -> loop-a"
+        }
+      }
+    },
+    {
+      "name": "held out of the experiment: off variation, in_holdout",
+      "flag": "checkout-copy",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "control",
+        "value": "Pay now",
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_holdout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "in the experiment: rollout variation",
+      "flag": "checkout-copy",
+      "context": {
+        "key": "user-0",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "short",
+        "value": "Pay",
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_rollout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "in the experiment: the other arm",
+      "flag": "checkout-copy",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "friendly",
+        "value": "Let's pay",
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_rollout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "a shared experiment key holds out the same users",
+      "flag": "checkout-banner",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_holdout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "a shared experiment key keeps the same users in",
+      "flag": "checkout-copy",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "short",
+        "value": "Pay",
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_rollout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "a shared experiment key keeps the same users in (second flag)",
+      "flag": "checkout-banner",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_rollout": true,
+          "experiment": "q4-checkout"
+        }
+      }
+    },
+    {
+      "name": "rule rollout holdout bucketed by company",
+      "flag": "search-ranking",
+      "context": {
+        "key": "user-6",
+        "attributes": {
+          "country": "BD",
+          "company": "company-1"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "RULE_MATCH",
+          "rule_id": "bd-teams",
+          "rule_index": 0,
+          "in_holdout": true
+        }
+      }
+    },
+    {
+      "name": "rule rollout outside the holdout",
+      "flag": "search-ranking",
+      "context": {
+        "key": "user-7",
+        "attributes": {
+          "country": "BD",
+          "company": "company-3"
+        }
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "RULE_MATCH",
+          "rule_id": "bd-teams",
+          "rule_index": 0,
+          "in_rollout": true
+        }
+      }
+    },
+    {
+      "name": "rule not matched: no experiment",
+      "flag": "search-ranking",
+      "context": {
+        "key": "user-7",
+        "attributes": {
+          "country": "IN",
+          "company": "company-1"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "FALLTHROUGH"
+        }
+      }
+    },
+    {
+      "name": "experiment behind a prerequisite: prerequisite first",
+      "flag": "gated-experiment",
+      "context": {
+        "key": "user-0",
+        "attributes": {
+          "country": "IN"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "PREREQUISITE_FAILED",
+          "prerequisite_key": "new-checkout"
+        }
+      }
+    },
+    {
+      "name": "experiment behind a prerequisite: held out (flag salt seed)",
+      "flag": "gated-experiment",
+      "context": {
+        "key": "user-0",
+        "attributes": {
+          "country": "BD"
+        }
+      },
+      "expected": {
+        "variation": "off",
+        "value": false,
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_holdout": true
+        }
+      }
+    },
+    {
+      "name": "experiment behind a prerequisite: in the experiment",
+      "flag": "gated-experiment",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "country": "BD"
+        }
+      },
+      "expected": {
+        "variation": "on",
+        "value": true,
+        "reason": {
+          "kind": "FALLTHROUGH",
+          "in_rollout": true
+        }
+      }
+    }
+  ]
+}
