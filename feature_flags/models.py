@@ -124,6 +124,8 @@ class FlagConfig(Base):
     targets: Mapped[list[Any]] = mapped_column(JSON, default=list)
     rules: Mapped[list[Any]] = mapped_column(JSON, default=list)
     fallthrough: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # [{"flag_key": "new-checkout", "variation": "on"}, ...]: all must hold before targeting
+    prerequisites: Mapped[list[Any]] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime]
 

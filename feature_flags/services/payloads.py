@@ -31,6 +31,7 @@ def flag_payload(flag: Flag, config: FlagConfig) -> dict[str, Any]:
         "enabled": config.enabled,
         "variations": flag.variations,
         "off_variation": config.off_variation,
+        "prerequisites": config.prerequisites or [],
         "targets": config.targets,
         "rules": config.rules,
         "fallthrough": config.fallthrough,
